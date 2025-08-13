@@ -1,0 +1,281 @@
+import { useEffect, useMemo, useRef, useState } from "react"; import { Plus, X, ExternalLink, Chrome as ChromeIcon, Copy, Maximize2, Minimize2, Square, Move } from "lucide-react"; import { Button } from "@/components/ui/button"; import { Input } from "@/components/ui/input"; import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+/**
+
+Mini navegador tipo "Chrome" para GitHub Pages
+
+Tabs con barra de dirección
+
+
+"Ventanas emergentes" internas (flotantes y re‑dimensionables) con iframes
+
+
+Botones rápidos: YouTube (embed), TikTok (embed), Custom URL (con aviso de restricciones)
+
+
+⚠️ Notas importantes (limitaciones del navegador):
+
+Muchas webs bloquean ser abiertas dentro de <iframe> (X-Frame-Options / CSP).
+
+
+YouTube funciona si usamos el formato de "embed".
+
+
+TikTok sólo funciona con enlaces a videos usando el endpoint de embed v2.
+
+
+Google, Facebook, etc., NO se podrán mostrar en iframe; en esos casos se abre en una nueva pestaña. */
+
+
+
+// Utilidades function toYouTubeEmbed(url) { try { const u = new URL(url.trim()); // youtu.be/<id> if (u.hostname.includes("youtu.be")) { return https://www.youtube.com/embed/${u.pathname.replace("/", "")}\n; } // youtube.com/watch?v=<id> if (u.hostname.includes("youtube.com")) { const id = u.searchParams.get("v"); if (id) return https://www.youtube.com/embed/${id}; // /shorts/<id> const parts = u.pathname.split("/").filter(Boolean); const ix = parts.indexOf("shorts"); if (ix >= 0 && parts[ix + 1]) return https://www.youtube.com/embed/${parts[ix + 1]}; } return null; } catch { return null; } }
+
+function toTikTokEmbed(url) { // Acepta: https://www.tiktok.com/@user/video/1234567890 // Devuelve: https://www.tiktok.com/embed/v2/1234567890 try { const u = new URL(url.trim()); if (!u.hostname.includes("tiktok.com")) return null; const parts = u.pathname.split("/").filter(Boolean); const ix = parts.indexOf("video"); const id = ix >= 0 ? parts[ix + 1] : null; if (id) return https://www.tiktok.com/embed/v2/${id}; return null; } catch { return null; } }
+
+function isLikelyBlocked(url) { // Heurística simple para avisar: dominios que casi siempre bloquean iframe const blocked = ["google.com", "facebook.com", "instagram.com", "x.com", "twitter.com", "github.com"]; // etc. return blocked.some((d) => url.includes(d)); }
+
+// Componente de una ventana flotante function FloatingWindow({ id, title, src, onClose, onFocus, active, initial }) { const [pos, setPos] = useState({ x: initial?.x ?? 80, y: initial?.y ?? 80 }); const [size, setSize] = useState({ w: initial?.w ?? 480, h: initial?.h ?? 320 }); const [isMax, setIsMax] = useState(false); const winRef = useRef(null); const dragRef = useRef(null);
+
+// Drag useEffect(() => { const handle = dragRef.current; if (!handle) return; let start = null;
+
+const onPointerDown = (e) => {
+  start = { ox: e.clientX - pos.x, oy: e.clientY - pos.y };
+  (e.target).setPointerCapture?.(e.pointerId);
+  onFocus?.(id);
+};
+const onPointerMove = (e) => {
+  if (!start || isMax) return;
+  setPos({ x: e.clientX - start.ox, y: e.clientY - start.oy });
+};
+const onPointerUp = () => (start = null);
+
+handle.addEventListener("pointerdown", onPointerDown);
+window.addEventListener("pointermove", onPointerMove);
+window.addEventListener("pointerup", onPointerUp);
+return () => {
+  handle.removeEventListener("pointerdown", onPointerDown);
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("pointerup", onPointerUp);
+};
+
+}, [pos.x, pos.y, isMax, id, onFocus]);
+
+// Resize (esquina inferior derecha) const resizerRef = useRef(null); useEffect(() => { const resizer = resizerRef.current; if (!resizer) return; let start = null;
+
+const onPointerDown = (e) => {
+  start = { x: e.clientX, y: e.clientY, w: size.w, h: size.h };
+  (e.target).setPointerCapture?.(e.pointerId);
+  onFocus?.(id);
+};
+const onPointerMove = (e) => {
+  if (!start || isMax) return;
+  const w = Math.max(260, start.w + (e.clientX - start.x));
+  const h = Math.max(160, start.h + (e.clientY - start.y));
+  setSize({ w, h });
+};
+const onPointerUp = () => (start = null);
+
+resizer.addEventListener("pointerdown", onPointerDown);
+window.addEventListener("pointermove", onPointerMove);
+window.addEventListener("pointerup", onPointerUp);
+return () => {
+  resizer.removeEventListener("pointerdown", onPointerDown);
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("pointerup", onPointerUp);
+};
+
+}, [size.w, size.h, isMax, id, onFocus]);
+
+const style = isMax ? { left: 16, top: 96, width: calc(100% - 32px), height: calc(100vh - 128px) } : { left: pos.x, top: pos.y, width: size.w, height: size.h };
+
+return ( <div ref={winRef} className={fixed z-30 shadow-2xl rounded-2xl border bg-white overflow-hidden ${ active ? "ring-2 ring-blue-500" : "opacity-95" }} style={style} onMouseDown={() => onFocus?.(id)} > <div
+ref={dragRef}
+className="cursor-move select-none flex items-center justify-between gap-2 px-3 py-2 bg-gray-100 border-b"
+> <div className="flex items-center gap-2 truncate"> <Move className="w-4 h-4 opacity-60" /> <span className="font-medium truncate max-w-[280px]" title={title}>{title}</span> </div> <div className="flex items-center gap-2"> <Button size="icon" variant="ghost" onClick={() => setIsMax((v) => !v)} title={isMax ? "Restaurar" : "Maximizar"}> {isMax ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />} </Button> <Button size="icon" variant="ghost" onClick={onClose} title="Cerrar"> <X className="w-4 h-4" /> </Button> </div> </div> <div className="w-full h-full bg-neutral-950"> {/* IFRAME /} <iframe src={src} title={title} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen referrerPolicy="no-referrer-when-downgrade" sandbox={"allow-same-origin allow-scripts allow-popups allow-forms allow-presentation"} /> </div> {/ Resizer */} {!isMax && ( <div ref={resizerRef} className="absolute right-0 bottom-0 w-6 h-6 cursor-se-resize bg-transparent" /> )} </div> ); }
+
+function NewTab({ onQuick }) { return ( <div className="p-6 md:p-10 lg:p-16"> <div className="max-w-4xl mx-auto grid gap-6"> <div className="flex items-center gap-3"> <ChromeIcon className="w-7 h-7" /> <h1 className="text-2xl md:text-3xl font-bold">Tokio Mini Browser</h1> </div>
+
+<Card className="rounded-2xl">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg">Ventanas emergentes rápidas</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-3">
+        <Button onClick={() => onQuick("youtube")}>YouTube</Button>
+        <Button onClick={() => onQuick("tiktok")}>TikTok</Button>
+        <Button variant="secondary" onClick={() => onQuick("custom")}>
+          Custom URL
+        </Button>
+        <Button variant="outline" onClick={() => onQuick("newtab")}>Abrir en pestaña nueva</Button>
+      </CardContent>
+    </Card>
+
+    <Card className="rounded-2xl">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg">Aviso de compatibilidad</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm text-muted-foreground space-y-2">
+        <p>
+          Algunas webs impiden mostrarse dentro de esta app por políticas de seguridad del navegador (X-Frame-Options / CSP).
+          Si un sitio no carga en la ventana, usa <span className="font-medium">Abrir en pestaña nueva</span>.
+        </p>
+        <ul className="list-disc pl-5">
+          <li>YouTube: usa enlaces de <span className="font-mono">watch?v=</span>, <span className="font-mono">shorts/</span> o <span className="font-mono">youtu.be/</span>.</li>
+          <li>TikTok: pega un enlace de video; se convierte automáticamente a <span className="font-mono">/embed/v2/&lt;id&gt;</span>.</li>
+          <li>Google, Facebook, X/Twitter, Instagram, GitHub: abrirán mejor en una pestaña nueva.</li>
+        </ul>
+      </CardContent>
+    </Card>
+  </div>
+</div>
+
+); }
+
+export default function App() { // Estado de pestañas const [tabs, setTabs] = useState([ { id: "t1", title: "Nueva pestaña", url: "", isNewTab: true }, ]); const [activeTab, setActiveTab] = useState("t1");
+
+// Ventanas flotantes const [wins, setWins] = useState([]); // {id, title, src}
+
+const current = useMemo(() => tabs.find((t) => t.id === activeTab), [tabs, activeTab]);
+
+// Añadir pestaña const addTab = (url = "", title = "Nueva pestaña") => { const id = t${Math.random().toString(36).slice(2, 8)}; setTabs((t) => [...t, { id, title, url, isNewTab: url === "" }]); setActiveTab(id); };
+
+const closeTab = (id) => { setTabs((ts) => { const idx = ts.findIndex((t) => t.id === id); if (idx === -1) return ts; const newTs = ts.filter((t) => t.id !== id); if (!newTs.length) return [{ id: "t1", title: "Nueva pestaña", url: "", isNewTab: true }]; if (activeTab === id) { const next = newTs[Math.max(0, idx - 1)]; setActiveTab(next.id); } return newTs; }); };
+
+// Navegar en la pestaña actual const [addr, setAddr] = useState(""); useEffect(() => { setAddr(current?.url || ""); }, [current?.url]);
+
+const navigate = (raw) => { let url = (raw || addr || "").trim(); if (!url) return;
+
+// Si parece búsqueda, usar DuckDuckGo (que permite abrir en nueva pestaña sin CSP extra)
+if (!/^[a-z]+:\/\//i.test(url)) {
+  url = `https://duckduckgo.com/?q=${encodeURIComponent(url)}`;
+}
+
+const blocked = isLikelyBlocked(url);
+setTabs((ts) => ts.map((t) => (t.id === activeTab ? { ...t, url, title: blocked ? "(Abrir en pestaña)" : url, isNewTab: false } : t)));
+if (blocked) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+};
+
+// Crear ventana emergente const addWindow = (type) => { const id = w${Math.random().toString(36).slice(2, 8)};
+
+if (type === "youtube") {
+  const sample = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  setWins((w) => [
+    ...w,
+    { id, title: "YouTube", src: toYouTubeEmbed(sample) || sample, z: Date.now() },
+  ]);
+  return;
+}
+
+if (type === "tiktok") {
+  const sample = "https://www.tiktok.com/@scout2015/video/6718335390845095173";
+  setWins((w) => [
+    ...w,
+    { id, title: "TikTok", src: toTikTokEmbed(sample) || sample, z: Date.now() },
+  ]);
+  return;
+}
+
+if (type === "custom") {
+  const u = prompt("Pega la URL (YouTube/TikTok recomendados). Para otros sitios, quizá se abra en nueva pestaña.");
+  if (!u) return;
+  let src = u.trim();
+  const yt = toYouTubeEmbed(src);
+  const tk = toTikTokEmbed(src);
+  if (yt) src = yt;
+  else if (tk) src = tk;
+  if (isLikelyBlocked(src)) {
+    window.open(src, "_blank", "noopener,noreferrer");
+    return;
+  }
+  setWins((w) => [...w, { id, title: new URL(src).hostname, src, z: Date.now() }]);
+  return;
+}
+
+if (type === "newtab") {
+  const u = prompt("URL para abrir en nueva pestaña:");
+  if (u) window.open(u.trim(), "_blank", "noopener,noreferrer");
+  return;
+}
+
+};
+
+const closeWindow = (id) => setWins((w) => w.filter((x) => x.id !== id)); const focusWindow = (id) => setWins((w) => w.map((x) => (x.id === id ? { ...x, z: Date.now() } : x)));
+
+return ( <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 text-gray-900"> {/* Barra superior estilo Chrome /} <div className="sticky top-0 z-40 backdrop-blur bg-white/70 border-b"> <div className="px-3 py-2 flex items-center gap-2"> <ChromeIcon className="w-5 h-5" /> {/ Tabs /} <div className="flex items-center gap-2 overflow-auto no-scrollbar flex-1"> {tabs.map((t) => ( <div key={t.id} onClick={() => setActiveTab(t.id)} className={group flex items-center gap-2 px-3 py-1.5 rounded-2xl border shadow-sm cursor-pointer whitespace-nowrap ${ activeTab === t.id ? "bg-white" : "bg-gray-100 hover:bg-gray-50" }} title={t.title} > <span className="text-sm truncate max-w-[160px]">{t.title || "Nueva pestaña"}</span> <button onClick={(e) => { e.stopPropagation(); closeTab(t.id); }} className="opacity-60 hover:opacity-100" > <X className="w-4 h-4" /> </button> </div> ))} <Button size="icon" variant="ghost" onClick={() => addTab()} title="Nueva pestaña"> <Plus className="w-5 h-5" /> </Button> </div> </div> {/ Omnibox */} <div className="px-3 pb-3"> <div className="flex gap-2"> <Input placeholder="Pega una URL o escribe para buscar..." value={addr} onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") navigate(); }} className="rounded-xl" /> <Button onClick={() => navigate()} className="rounded-xl">Ir</Button> <Button variant="secondary" onClick={() => addWindow("youtube")} className="rounded-xl">YT pop-up</Button> <Button variant="secondary" onClick={() => addWindow("tiktok")} className="rounded-xl">TT pop-up</Button> <Button variant="outline" onClick={() => addWindow("custom")} className="rounded-xl">Ventana personalizada</Button> </div> </div> </div>
+
+{/* Contenido de la pestaña */}
+  <div className="min-h-[60vh]">
+    {current?.isNewTab ? (
+      <NewTab onQuick={addWindow} />
+    ) : isLikelyBlocked(current?.url || "") ? (
+      <div className="p-8 grid place-items-center">
+        <Card className="max-w-xl w-full">
+          <CardHeader>
+            <CardTitle>Este sitio no permite mostrarse aquí</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              El sitio que intentas abrir bloquea el uso dentro de iframes. Te lo abrimos en una pestaña nueva.
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={() => window.open(current.url, "_blank", "noopener,noreferrer")}>
+                Abrir en pestaña nueva
+              </Button>
+              <Button variant="secondary" onClick={() => addWindow("custom")}>Abrir otra URL</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    ) : (
+      <div className="w-full h-[calc(100vh-140px)] bg-black">
+        <iframe
+          key={current?.url}
+          src={current?.url}
+          className="w-full h-full"
+          title={current?.title || current?.url}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          referrerPolicy="no-referrer-when-downgrade"
+          sandbox={"allow-same-origin allow-scripts allow-popups allow-forms allow-presentation"}
+          onLoad={(e) => {
+            try {
+              const src = e.currentTarget?.contentWindow?.location?.href;
+              if (src) {
+                setTabs((ts) => ts.map((t) => (t.id === activeTab ? { ...t, title: new URL(src).hostname } : t)));
+              }
+            } catch {
+              /* cross-origin */
+            }
+          }}
+        />
+      </div>
+    )}
+  </div>
+
+  {/* Ventanas flotantes */}
+  {wins
+    .sort((a, b) => (a.z || 0) - (b.z || 0))
+    .map((w, i, arr) => (
+      <div key={w.id} style={{ zIndex: 100 + i }}>
+        <FloatingWindow
+          id={w.id}
+          title={w.title}
+          src={w.src}
+          onClose={() => closeWindow(w.id)}
+          onFocus={(id) => focusWindow(id)}
+          active={i === arr.length - 1}
+          initial={{ x: 80 + i * 24, y: 120 + i * 24, w: 520, h: 320 }}
+        />
+      </div>
+    ))}
+
+  {/* Footer */}
+  <footer className="p-6 text-center text-xs text-muted-foreground">
+    Hecho con ❤ para Luis — Tokio Hub • Recuerda publicar este archivo como <span className="font-mono">index.html</span> en GitHub Pages.
+  </footer>
+</div>
+
+); }
+
